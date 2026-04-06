@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import SmashScreen from "../components/SmashScreen.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
   fetchActiveSeason,
@@ -24,6 +25,22 @@ export default function Battle() {
 
   const [selectedId, setSelectedId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  /** After inserting a vote, power-up UI before showing the confirmation banner */
+  const [smashSession, setSmashSession] = useState(null);
+
+  const completeSmash = useCallback(() => {
+    setSmashSession((session) => {
+      if (!session) return null;
+      const { voteId, product } = session;
+      queueMicrotask(() => {
+        setLoadState((s) => ({
+          ...s,
+          existingVote: { id: voteId, product_id: product.id },
+        }));
+      });
+      return null;
+    });
+  }, []);
 
   const loadBattle = useCallback(async () => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
@@ -74,7 +91,7 @@ export default function Battle() {
 
       const { data: products, error: productsError } = await supabase
         .from("products")
-        .select("id, name, brand, image_url")
+        .select("id, name, brand, image_url, power_up_labels")
         .in("id", ids);
 
       if (productsError) throw productsError;
@@ -152,16 +169,17 @@ export default function Battle() {
         user_id: user?.id ?? null,
       };
 
-      const { error } = await supabase.from("votes").insert(row);
+      const { data: inserted, error } = await supabase.from("votes").insert(row).select("id").single();
 
       if (error) throw error;
 
-      setLoadState((s) => ({
-        ...s,
-        error: "",
-        existingVote: { product_id: selectedId },
-      }));
+      const product = loadState.products.find((p) => p.id === selectedId);
+      setLoadState((s) => ({ ...s, error: "" }));
       setSelectedId(null);
+      setSmashSession({
+        voteId: inserted.id,
+        product: product ?? { id: selectedId, power_up_labels: null },
+      });
     } catch (e) {
       setLoadState((s) => ({
         ...s,
@@ -186,7 +204,7 @@ export default function Battle() {
     loadState.existingVote &&
     loadState.products.find((p) => p.id === loadState.existingVote.product_id);
 
-  const showVotedBanner = Boolean(loadState.existingVote && votedProduct);
+  const showVotedBanner = Boolean(loadState.existingVote && votedProduct && !smashSession);
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-violet-100 via-fuchsia-50 to-orange-50">
@@ -245,11 +263,21 @@ export default function Battle() {
 
         {loadState.status === "ready" && loadState.products.length >= 2 && (
           <>
+            {smashSession && loadState.season && loadState.matchupIndex != null ? (
+              <SmashScreen
+                product={smashSession.product}
+                seasonId={loadState.season.id}
+                matchupIndex={loadState.matchupIndex}
+                voteId={smashSession.voteId}
+                onComplete={completeSmash}
+              />
+            ) : (
+              <>
             <div className="mb-6 text-center">
               <h2 className="text-2xl font-extrabold tracking-tight text-violet-950 sm:text-3xl">
                 Today&apos;s battle
               </h2>
-              {!loadState.existingVote && (
+              {!loadState.existingVote && !smashSession && (
                 <p className="mt-1 text-sm text-violet-800/80">
                   Tap your favorite — big targets, no wrong answers.
                 </p>
@@ -281,7 +309,7 @@ export default function Battle() {
               </div>
             )}
 
-            {!loadState.existingVote && (
+            {!loadState.existingVote && !smashSession && (
               <>
                 <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6">
                   {loadState.products.map((p) => {
@@ -333,6 +361,8 @@ export default function Battle() {
                     </button>
                   </div>
                 )}
+              </>
+            )}
               </>
             )}
           </>
