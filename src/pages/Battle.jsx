@@ -278,7 +278,15 @@ export default function Battle() {
               </button>
             </>
           ) : (
-            <h1 className="text-lg font-bold text-violet-950 sm:text-xl">Smashalope</h1>
+            <>
+              <h1 className="text-lg font-bold text-violet-950 sm:text-xl">Smashalope</h1>
+              <Link
+                to="/login"
+                className="shrink-0 text-xs font-medium text-violet-600/80 transition hover:text-violet-800 hover:underline sm:text-sm"
+              >
+                Log in
+              </Link>
+            </>
           )}
         </div>
       </header>
