@@ -38,6 +38,7 @@ export default function Battle() {
     matchup: null,
     products: [],
     existingVote: null,
+    smashalopeLog: null,
   });
 
   const [selectedId, setSelectedId] = useState(null);
@@ -74,6 +75,7 @@ export default function Battle() {
           matchup: null,
           products: [],
           existingVote: null,
+          smashalopeLog: null,
         });
         return;
       }
@@ -88,6 +90,7 @@ export default function Battle() {
           matchup: null,
           products: [],
           existingVote: null,
+          smashalopeLog: null,
         });
         return;
       }
@@ -123,6 +126,7 @@ export default function Battle() {
           matchup: today.matchup,
           products: [],
           existingVote: null,
+          smashalopeLog: null,
         });
         return;
       }
@@ -146,6 +150,7 @@ export default function Battle() {
           matchup: today.matchup,
           products: [],
           existingVote: null,
+          smashalopeLog: null,
         });
         return;
       }
@@ -166,6 +171,15 @@ export default function Battle() {
 
       if (voteError) throw voteError;
 
+      const { data: smashLog, error: smashError } = await supabase
+        .from("smashalope_log")
+        .select("id, user_id, decision")
+        .eq("season_id", season.id)
+        .eq("matchup_index", today.matchupIndex)
+        .maybeSingle();
+
+      if (smashError) throw smashError;
+
       setLoadState({
         status: "ready",
         error: "",
@@ -174,6 +188,7 @@ export default function Battle() {
         matchup: today.matchup,
         products: ordered,
         existingVote: voteRow ?? null,
+        smashalopeLog: smashLog ?? null,
       });
       setSelectedId(null);
     } catch (e) {
@@ -185,6 +200,7 @@ export default function Battle() {
         matchup: null,
         products: [],
         existingVote: null,
+        smashalopeLog: null,
       });
     }
   }, [user?.id]);
@@ -301,6 +317,28 @@ export default function Battle() {
 
         {loadState.status === "ready" && loadState.products.length >= 2 && (
           <>
+            {loadState.matchupIndex != null && (
+              <div className="mb-6 w-full space-y-3">
+                <p className="text-center text-sm font-medium text-violet-800/90 sm:text-base">
+                  {loadState.smashalopeLog?.user_id
+                    ? "The Smashalope has descended."
+                    : "The antlers await on the altar."}
+                </p>
+                {user?.id &&
+                  loadState.smashalopeLog?.user_id &&
+                  loadState.smashalopeLog.user_id === user.id && (
+                    <div
+                      className="rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 px-4 py-3 text-center shadow-lg shadow-amber-300/40 ring-1 ring-amber-300/60"
+                      role="status"
+                    >
+                      <p className="text-lg font-extrabold tracking-tight text-amber-950 sm:text-xl">
+                        The Golden Smashalope has chosen you
+                      </p>
+                    </div>
+                  )}
+              </div>
+            )}
+
             {smashSession && loadState.season && loadState.matchupIndex != null ? (
               <SmashScreen
                 product={smashSession.product}
