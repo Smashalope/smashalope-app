@@ -363,6 +363,17 @@ export default function Battle() {
                 )}
               </>
             )}
+
+            {loadState.season && !smashSession && (
+              <div className="mt-10 flex justify-center">
+                <Link
+                  to="/bracket"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border-2 border-violet-400 bg-white px-6 py-2.5 text-sm font-bold text-violet-800 shadow-sm transition hover:bg-violet-50"
+                >
+                  View Bracket
+                </Link>
+              </div>
+            )}
               </>
             )}
           </>

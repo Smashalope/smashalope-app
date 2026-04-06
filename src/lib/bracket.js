@@ -10,6 +10,22 @@ import { supabase } from "./supabase.js";
  *
  * Flattens all `matchups` from every `round` in order (round order, then matchup order).
  */
+/**
+ * Collects every non-null product_a / product_b UUID referenced in the bracket (for batch product fetch).
+ */
+export function collectBracketProductIds(bracketStructure) {
+  const ids = new Set();
+  const rounds = bracketStructure?.rounds;
+  if (!Array.isArray(rounds)) return [];
+  for (const round of rounds) {
+    for (const m of round?.matchups ?? []) {
+      if (m?.product_a != null) ids.add(String(m.product_a));
+      if (m?.product_b != null) ids.add(String(m.product_b));
+    }
+  }
+  return [...ids];
+}
+
 export function flattenMatchups(bracketStructure) {
   if (!bracketStructure || typeof bracketStructure !== "object") return [];
   const rounds = bracketStructure.rounds;
@@ -27,14 +43,30 @@ export function flattenMatchups(bracketStructure) {
 }
 
 /**
- * Calendar days from `startDate` to `referenceDate` (local midnight), inclusive of the start day as offset 0.
- * Returns a 1-based "season day" where the first calendar day of the season is day 1.
+ * Interprets `YYYY-MM-DD` (and ISO strings starting with that date) in the local calendar,
+ * avoiding UTC midnight shifts that make `new Date("2025-04-05")` land on the wrong local day.
+ */
+function toLocalCalendarDate(input) {
+  if (input == null) return new Date(NaN);
+  if (typeof input === "string") {
+    const m = input.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) {
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    }
+  }
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return d;
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/**
+ * Whole calendar days from season start to reference (local dates). Same calendar day → 0.
+ * Returns a 1-based "season day" where the first calendar day of the season is day 1
+ * (e.g. start Apr 5 + today Apr 5 → 1; today Apr 6 → 2).
  */
 export function getSeasonDayNumber(startDate, referenceDate = new Date()) {
-  const s = new Date(startDate);
-  const r = new Date(referenceDate);
-  const start = new Date(s.getFullYear(), s.getMonth(), s.getDate());
-  const ref = new Date(r.getFullYear(), r.getMonth(), r.getDate());
+  const start = toLocalCalendarDate(startDate);
+  const ref = toLocalCalendarDate(referenceDate);
   const diffDays = Math.round((ref - start) / 86400000);
   return diffDays + 1;
 }
