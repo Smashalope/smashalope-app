@@ -10,6 +10,23 @@ import {
 import { getSessionId } from "../lib/session.js";
 import { supabase } from "../lib/supabase.js";
 
+/** True when local time in America/New_York is 8:00 PM or later (cron fallback window). */
+function isPast8PMEastern(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  return hour >= 20;
+}
+
+function matchupHasNoWinner(matchup) {
+  if (!matchup) return true;
+  const w = matchup.winner;
+  return w == null || String(w).trim() === "";
+}
+
 export default function Battle() {
   const { user, profile, loading: authLoading, signOut } = useAuth();
 
@@ -42,7 +59,7 @@ export default function Battle() {
     });
   }, []);
 
-  const loadBattle = useCallback(async () => {
+  const loadBattle = useCallback(async (fromResolveChain = false) => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
 
     try {
@@ -73,6 +90,27 @@ export default function Battle() {
           existingVote: null,
         });
         return;
+      }
+
+      if (
+        matchupHasNoWinner(today.matchup) &&
+        !fromResolveChain &&
+        isPast8PMEastern()
+      ) {
+        try {
+          const origin =
+            typeof import.meta.env.VITE_API_ORIGIN === "string" && import.meta.env.VITE_API_ORIGIN
+              ? import.meta.env.VITE_API_ORIGIN.replace(/\/$/, "")
+              : "";
+          const url = origin ? `${origin}/api/resolve-daily` : "/api/resolve-daily";
+          const res = await fetch(url, { method: "GET" });
+          if (res.ok) {
+            await loadBattle(true);
+            return;
+          }
+        } catch {
+          /* continue with current bracket */
+        }
       }
 
       const ids = getProductIdsFromMatchup(today.matchup);
