@@ -107,11 +107,18 @@ function MatchupCard({
   const winnerId = matchup.winner != null && matchup.winner !== "" ? String(matchup.winner) : null;
 
   const hasWinner = Boolean(winnerId);
-  const isLive = !hasWinner && Number.isFinite(dayNum) && dayNum === currentDay;
+  const isMatchupDay = Number.isFinite(dayNum) && dayNum === currentDay;
+  const isLive = !hasWinner && isMatchupDay;
   const hasBothProducts = Boolean(pa && pb);
+  const hasNoProducts = !pa && !pb;
+  const hasPartialProducts = Boolean((pa && !pb) || (!pa && pb));
+
   const isUpcomingKnown =
     !hasWinner && hasBothProducts && Number.isFinite(dayNum) && dayNum > currentDay;
-  const isTbd = !hasWinner && !hasBothProducts;
+  const isUpcomingPartial =
+    !hasWinner && hasPartialProducts && Number.isFinite(dayNum) && dayNum > currentDay;
+  const isLivePartial = !hasWinner && hasPartialProducts && isMatchupDay;
+  const isTbdBoth = !hasWinner && hasNoProducts;
 
   const [leftFeed, rightFeed] = describeFeedsFrom(matchup.feeds_from, matchupsByIndex);
 
@@ -200,7 +207,72 @@ function MatchupCard({
     );
   }
 
-  if (isTbd) {
+  const tbdPlaceholder = (feedText) => (
+    <div className="flex min-h-[5rem] flex-1 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-200/60 px-3 py-4 text-center">
+      <span className="text-3xl font-black text-gray-400">?</span>
+      {feedText ? (
+        <p className="mt-1 text-xs font-semibold leading-snug text-gray-600 sm:text-sm">{feedText}</p>
+      ) : null}
+    </div>
+  );
+
+  const knownSide = (product) => (
+    <div className="flex min-h-[5rem] flex-1 flex-col justify-center rounded-xl border border-violet-200/80 bg-white/90 px-3 py-4">
+      <p className="text-xs font-bold uppercase text-gray-500">{product?.brand}</p>
+      <p className="font-bold text-gray-900">{product?.name ?? "—"}</p>
+    </div>
+  );
+
+  if (isUpcomingPartial) {
+    return (
+      <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50/50 p-4">
+        <p className="mb-3 text-xs font-semibold text-violet-700">Day {matchup.day}</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:justify-between sm:gap-4">
+          {pa ? knownSide(prodA) : tbdPlaceholder(leftFeed)}
+          <span className="flex shrink-0 items-center justify-center text-sm font-bold text-gray-400">
+            vs
+          </span>
+          {pb ? knownSide(prodB) : tbdPlaceholder(rightFeed)}
+        </div>
+      </div>
+    );
+  }
+
+  if (isLivePartial) {
+    return (
+      <div className="rounded-2xl border-2 border-emerald-400 bg-white p-4 shadow-lg ring-2 ring-emerald-400/40 ring-offset-2 ring-offset-violet-50 animate-pulse">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <span className="inline-flex items-center rounded-full bg-emerald-600 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-white">
+            Live now
+          </span>
+          <span className="text-xs font-medium text-gray-500">Day {matchup.day}</span>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:gap-4">
+          {pa ? (
+            <div className="flex min-h-[5rem] flex-1 flex-col justify-center">
+              <p className="text-xs font-bold uppercase text-violet-600">{prodA?.brand}</p>
+              <p className="font-bold text-violet-950">{prodA?.name}</p>
+            </div>
+          ) : (
+            tbdPlaceholder(leftFeed)
+          )}
+          <span className="flex shrink-0 items-center justify-center text-sm font-bold text-gray-400">
+            vs
+          </span>
+          {pb ? (
+            <div className="flex min-h-[5rem] flex-1 flex-col justify-center text-right sm:text-left">
+              <p className="text-xs font-bold uppercase text-violet-600">{prodB?.brand}</p>
+              <p className="font-bold text-violet-950">{prodB?.name}</p>
+            </div>
+          ) : (
+            tbdPlaceholder(rightFeed)
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (isTbdBoth) {
     return (
       <div className="rounded-2xl border border-gray-200 bg-gray-100/80 p-4">
         <p className="mb-3 text-xs font-medium text-gray-500">Day {matchup.day ?? "—"}</p>
@@ -228,6 +300,19 @@ function MatchupCard({
           <p className="font-bold text-gray-900">{prodA?.name}</p>
           <span className="text-gray-400">vs</span>
           <p className="font-bold text-gray-900">{prodB?.name}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasPartialProducts) {
+    return (
+      <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+        <p className="mb-2 text-xs font-semibold text-amber-800">Day {matchup.day}</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:justify-between sm:gap-4">
+          {pa ? knownSide(prodA) : tbdPlaceholder(leftFeed)}
+          <span className="flex shrink-0 items-center justify-center text-sm text-amber-700/80">vs</span>
+          {pb ? knownSide(prodB) : tbdPlaceholder(rightFeed)}
         </div>
       </div>
     );
