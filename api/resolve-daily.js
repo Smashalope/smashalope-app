@@ -141,6 +141,34 @@ function pickWinnerFromVotes(votes, productA, productB) {
   };
 }
 
+/** Whoever has fewer votes after the same tie-break as pickWinnerFromVotes (discard latest until unequal). Chaos winner = this product id. */
+function pickLoserFromVotes(votes, productA, productB) {
+  let working = (votes ?? []).filter((v) => {
+    const id = String(v.product_id);
+    return id === String(productA) || id === String(productB);
+  });
+
+  if (working.length === 0) {
+    return Math.random() < 0.5 ? String(productA) : String(productB);
+  }
+
+  let cA = 0;
+  let cB = 0;
+  for (;;) {
+    const t = tallyAB(working, productA, productB);
+    cA = t.a;
+    cB = t.b;
+    if (cA < cB) return String(productA);
+    if (cB < cA) return String(productB);
+    if (working.length <= 1) {
+      break;
+    }
+    working = sortVotesLatestFirst(working).slice(1);
+  }
+
+  return Math.random() < 0.5 ? String(productA) : String(productB);
+}
+
 function buildVotePct(productA, productB, cA, cB) {
   const total = cA + cB;
   if (total <= 0) {
@@ -152,7 +180,7 @@ function buildVotePct(productA, productB, cA, cB) {
   return { [String(productA)]: pctA, [String(productB)]: pctB };
 }
 
-function applyWinnerToStructure(structure, resolvedIndex, winnerId, decidedBy, votePct) {
+function applyWinnerToStructure(structure, resolvedIndex, winnerId, decidedBy, votePct, smashalopeOutcome) {
   const copy = JSON.parse(JSON.stringify(structure));
   let resolved = null;
 
@@ -162,6 +190,7 @@ function applyWinnerToStructure(structure, resolvedIndex, winnerId, decidedBy, v
         m.winner = winnerId;
         m.decided_by = decidedBy;
         m.vote_pct = votePct;
+        m.smashalope_outcome = smashalopeOutcome ?? null;
         resolved = m;
       }
     }
@@ -282,16 +311,89 @@ export default async function handler(req, res) {
 
     if (votesErr) throw votesErr;
 
+    const { data: smashLog, error: smashErr } = await supabase
+      .from("smashalope_log")
+      .select("id, user_id, decision, decision_product_id")
+      .eq("season_id", season.id)
+      .eq("matchup_index", matchupIndex)
+      .maybeSingle();
+
+    if (smashErr) throw smashErr;
+
     const list = votes ?? [];
-    const { winnerId, decidedBy, counts } = pickWinnerFromVotes(list, productA, productB);
-    const votePct = buildVotePct(productA, productB, counts.a, counts.b);
+    const fullTally = tallyAB(list, productA, productB);
+    const votePct = buildVotePct(productA, productB, fullTally.a, fullTally.b);
+
+    const popularResult = pickWinnerFromVotes(list, productA, productB);
+    const popularWinnerId = popularResult.winnerId;
+    const popularDecidedBy = popularResult.decidedBy;
+
+    let finalWinnerId = popularWinnerId;
+    let finalDecidedBy = popularDecidedBy;
+    /** @type {string | null} */
+    let smashalopeOutcome = null;
+    let overrodePopular = false;
+
+    const hasSmashalope =
+      smashLog &&
+      smashLog.user_id != null &&
+      String(smashLog.user_id).trim() !== "";
+
+    if (hasSmashalope) {
+      const dec = smashLog.decision;
+
+      if (dec === "product_a" || dec === "product_b") {
+        let pickId = smashLog.decision_product_id;
+        if (pickId == null || pickId === "") {
+          pickId = dec === "product_a" ? productA : productB;
+        }
+        pickId = String(pickId);
+        const validPick = pickId === String(productA) || pickId === String(productB);
+        if (!validPick) {
+          finalWinnerId = popularWinnerId;
+          finalDecidedBy = popularDecidedBy;
+          smashalopeOutcome = null;
+          overrodePopular = false;
+        } else {
+          finalWinnerId = pickId;
+          overrodePopular = pickId !== String(popularWinnerId);
+          if (pickId === String(popularWinnerId)) {
+            finalDecidedBy = "smashalope_upheld";
+            smashalopeOutcome = "upheld";
+          } else {
+            finalDecidedBy = "smashalope_upset";
+            smashalopeOutcome = "upset";
+          }
+        }
+      } else if (dec === "chaos") {
+        const filtered = (list ?? []).filter((v) => {
+          const id = String(v.product_id);
+          return id === String(productA) || id === String(productB);
+        });
+        if (filtered.length === 0) {
+          finalWinnerId =
+            String(popularWinnerId) === String(productA) ? String(productB) : String(productA);
+        } else {
+          finalWinnerId = pickLoserFromVotes(list, productA, productB);
+        }
+        finalDecidedBy = "chaos";
+        smashalopeOutcome = "chaos";
+        overrodePopular = String(finalWinnerId) !== String(popularWinnerId);
+      } else {
+        finalWinnerId = popularWinnerId;
+        finalDecidedBy = popularDecidedBy;
+        smashalopeOutcome = "abstain";
+        overrodePopular = false;
+      }
+    }
 
     const updatedStructure = applyWinnerToStructure(
       structure,
       matchupIndex,
-      winnerId,
-      decidedBy,
-      votePct
+      finalWinnerId,
+      finalDecidedBy,
+      votePct,
+      smashalopeOutcome
     );
 
     const seasonComplete = allMatchupsHaveWinners(updatedStructure);
@@ -305,17 +407,37 @@ export default async function handler(req, res) {
 
     if (upErr) throw upErr;
 
+    if (smashLog?.id) {
+      const { error: logUpErr } = await supabase
+        .from("smashalope_log")
+        .update({ vote_pct_at_call: votePct })
+        .eq("id", smashLog.id);
+      if (logUpErr) throw logUpErr;
+    }
+
     const { data: winnerRow } = await supabase
       .from("products")
       .select("id, name")
-      .eq("id", winnerId)
+      .eq("id", finalWinnerId)
+      .maybeSingle();
+
+    const { data: popularWinnerRow } = await supabase
+      .from("products")
+      .select("id, name")
+      .eq("id", popularWinnerId)
       .maybeSingle();
 
     return res.status(200).json({
       resolved: true,
-      winner: { id: winnerId, name: winnerRow?.name ?? null },
+      winner: { id: finalWinnerId, name: winnerRow?.name ?? null },
       vote_pct: votePct,
-      decided_by: decidedBy,
+      decided_by: finalDecidedBy,
+      smashalope_outcome: smashalopeOutcome,
+      smashalope_overrode_popular_vote: overrodePopular,
+      popular_vote_winner: {
+        id: popularWinnerId,
+        name: popularWinnerRow?.name ?? null,
+      },
       season_complete: seasonComplete,
       season_day: dayNum,
       matchup_index: matchupIndex,
