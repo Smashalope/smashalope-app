@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchActiveSeason, getProductIdsFromMatchup, getTodayMatchup } from "../lib/bracket.js";
-import { isPast8PMEastern } from "../lib/easternTime.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
 
-function useNowTick(ms = 30_000) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), ms);
-    return () => clearInterval(id);
-  }, [ms]);
-  return now;
-}
+// TODO(revert before launch): Restore the 8 PM ET decision lock.
+// 1) import { isPast8PMEastern } from "../lib/easternTime.js";  // or isPast11PMEastern for a later QA cutoff
+// 2) Re-add useNowTick (30s) so `now` updates and the UI crosses into locked at 8 PM without refresh.
+// 3) Replace the line below with: const locked = isPast8PMEastern(now);
+const locked = false;
 
 export default function SmashalopeDashboard() {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
-  const now = useNowTick(30_000);
-  const locked = isPast8PMEastern(now);
 
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
