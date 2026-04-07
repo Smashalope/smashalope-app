@@ -5,8 +5,8 @@
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/select-smashalope",
-      "schedule": "0 16 * * *"
+      "path": "/api/seed-smashalope",
+      "schedule": "0 10 * * *"
     }
   ],
   "rewrites": [

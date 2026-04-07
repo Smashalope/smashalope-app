@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { toDate } from "date-fns-tz";
 
 const TZ = "America/New_York";
 
@@ -67,6 +68,20 @@ function findMatchupForDay(structure, dayNum) {
   return flat.find((m) => Number(m?.day) === dayNum) ?? null;
 }
 
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+/** Random instant between 6:00 and 18:00 Eastern on the given civil calendar day. */
+function randomTargetTimeEasternToday(y, mo, d) {
+  const ymd = `${y}-${pad2(mo)}-${pad2(d)}`;
+  const start = toDate(`${ymd} 06:00:00`, { timeZone: TZ });
+  const end = toDate(`${ymd} 18:00:00`, { timeZone: TZ });
+  const t0 = start.getTime();
+  const t1 = end.getTime();
+  return new Date(t0 + Math.random() * (t1 - t0));
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET" && req.method !== "POST") {
     res.setHeader("Allow", "GET, POST");
@@ -89,7 +104,7 @@ export default async function handler(req, res) {
   try {
     const { data: season, error: seasonErr } = await supabase
       .from("seasons")
-      .select("id, start_date, bracket_structure, status")
+      .select("id, name, start_date, status, bracket_structure")
       .eq("status", "active")
       .order("start_date", { ascending: true })
       .limit(1)
@@ -113,10 +128,10 @@ export default async function handler(req, res) {
     const matchup = findMatchupForDay(structure, dayNum);
     if (!matchup) {
       return res.status(200).json({
-        selected: false,
+        ok: true,
+        seeded: false,
         reason: "no_matchup_today",
         season_day: dayNum,
-        message: `No matchup scheduled for season day ${dayNum}`,
       });
     }
 
@@ -125,95 +140,58 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Matchup missing index" });
     }
 
-    const { data: existing, error: logErr } = await supabase
+    const { data: existing, error: exErr } = await supabase
       .from("smashalope_log")
-      .select("id, user_id, decision")
+      .select("id")
       .eq("season_id", season.id)
       .eq("matchup_index", matchupIndex)
       .maybeSingle();
 
-    if (logErr) throw logErr;
-
-    if (existing?.user_id) {
+    if (exErr) throw exErr;
+    if (existing) {
       return res.status(200).json({
+        ok: true,
+        seeded: false,
         idempotent: true,
-        user_id: existing.user_id,
-        decision: existing.decision ?? null,
-        season_id: season.id,
-        matchup_index: matchupIndex,
+        message: "row_already_exists",
       });
     }
 
-    const { data: voteRows, error: votesErr } = await supabase
-      .from("votes")
-      .select("user_id")
-      .eq("season_id", season.id)
-      .eq("matchup_index", matchupIndex)
-      .not("user_id", "is", null);
+    const eastern = getEasternYmd(new Date());
+    const targetTime = randomTargetTimeEasternToday(eastern.y, eastern.mo, eastern.d);
 
-    if (votesErr) throw votesErr;
-
-    const eligible = [
-      ...new Set(
-        (voteRows ?? [])
-          .map((v) => v.user_id)
-          .filter((id) => id != null && String(id).trim() !== "")
-      ),
-    ];
-
-    if (eligible.length === 0) {
-      return res.status(200).json({
-        selected: false,
-        reason: "no_eligible_voters",
-        message: "No logged-in votes for this matchup",
-        season_id: season.id,
-        matchup_index: matchupIndex,
-      });
-    }
-
-    const userId = eligible[Math.floor(Math.random() * eligible.length)];
-
-    const { data: inserted, error: insErr } = await supabase
-      .from("smashalope_log")
-      .insert({
-        season_id: season.id,
-        matchup_index: matchupIndex,
-        user_id: userId,
-        decision: null,
-      })
-      .select("id, user_id, decision")
-      .single();
+    const { error: insErr } = await supabase.from("smashalope_log").insert({
+      season_id: season.id,
+      matchup_index: matchupIndex,
+      user_id: null,
+      target_time: targetTime.toISOString(),
+      decision: null,
+    });
 
     if (insErr) {
-      if (insErr.code === "23505" || /duplicate|unique/i.test(insErr.message ?? "")) {
-        const { data: row } = await supabase
-          .from("smashalope_log")
-          .select("id, user_id, decision")
-          .eq("season_id", season.id)
-          .eq("matchup_index", matchupIndex)
-          .maybeSingle();
-        if (row?.user_id) {
-          return res.status(200).json({
-            idempotent: true,
-            user_id: row.user_id,
-            decision: row.decision ?? null,
-            season_id: season.id,
-            matchup_index: matchupIndex,
-          });
-        }
+      if (insErr.code === "23505") {
+        return res.status(200).json({
+          ok: true,
+          seeded: false,
+          idempotent: true,
+          message: "insert_race",
+        });
       }
       throw insErr;
     }
 
-    return res.status(200).json({
-      idempotent: false,
-      user_id: inserted.user_id,
-      decision: inserted.decision ?? null,
-      season_id: season.id,
-      matchup_index: matchupIndex,
-    });
+    console.log(
+      JSON.stringify({
+        event: "seed_smashalope",
+        target_time: targetTime.toISOString(),
+        season_id: season.id,
+        matchup_index: matchupIndex,
+      })
+    );
+
+    return res.status(200).json({ ok: true, seeded: true });
   } catch (e) {
-    console.error("select-smashalope:", e);
+    console.error("seed-smashalope:", e);
     return res.status(500).json({
       error: e?.message ?? "Internal server error",
     });

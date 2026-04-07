@@ -21,6 +21,17 @@ function isPast8PMEastern(now = new Date()) {
   return hour >= 20;
 }
 
+/** True when Eastern time is 6:00 AM or later (lazy seed window). */
+function isAfter6AMEastern(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+  return hour >= 6;
+}
+
 function matchupHasNoWinner(matchup) {
   if (!matchup) return true;
   const w = matchup.winner;
@@ -45,6 +56,8 @@ export default function Battle() {
   const [submitting, setSubmitting] = useState(false);
   /** After inserting a vote, power-up UI before showing the confirmation banner */
   const [smashSession, setSmashSession] = useState(null);
+  /** Golden Smashalope win: full-screen reveal before SmashScreen */
+  const [goldenRevealSession, setGoldenRevealSession] = useState(null);
 
   const completeSmash = useCallback(() => {
     setSmashSession((session) => {
@@ -60,7 +73,16 @@ export default function Battle() {
     });
   }, []);
 
-  const loadBattle = useCallback(async (fromResolveChain = false) => {
+  useEffect(() => {
+    if (!goldenRevealSession) return undefined;
+    const t = setTimeout(() => {
+      setSmashSession(goldenRevealSession);
+      setGoldenRevealSession(null);
+    }, 3000);
+    return () => clearTimeout(t);
+  }, [goldenRevealSession]);
+
+  const loadBattle = useCallback(async (fromResolveChain = false, fromSeedFallback = false) => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
 
     try {
@@ -173,12 +195,34 @@ export default function Battle() {
 
       const { data: smashLog, error: smashError } = await supabase
         .from("smashalope_log")
-        .select("id, user_id, decision")
+        .select("id, user_id, decision, target_time")
         .eq("season_id", season.id)
         .eq("matchup_index", today.matchupIndex)
         .maybeSingle();
 
       if (smashError) throw smashError;
+
+      if (
+        !smashLog &&
+        !fromSeedFallback &&
+        matchupHasNoWinner(today.matchup) &&
+        isAfter6AMEastern()
+      ) {
+        try {
+          const origin =
+            typeof import.meta.env.VITE_API_ORIGIN === "string" && import.meta.env.VITE_API_ORIGIN
+              ? import.meta.env.VITE_API_ORIGIN.replace(/\/$/, "")
+              : "";
+          const url = origin ? `${origin}/api/seed-smashalope` : "/api/seed-smashalope";
+          const res = await fetch(url, { method: "GET" });
+          if (res.ok) {
+            await loadBattle(fromResolveChain, true);
+            return;
+          }
+        } catch {
+          /* continue without log row */
+        }
+      }
 
       setLoadState({
         status: "ready",
@@ -228,12 +272,57 @@ export default function Battle() {
       if (error) throw error;
 
       const product = loadState.products.find((p) => p.id === selectedId);
-      setLoadState((s) => ({ ...s, error: "" }));
-      setSelectedId(null);
-      setSmashSession({
+      const sessionPayload = {
         voteId: inserted.id,
         product: product ?? { id: selectedId, power_up_labels: null },
-      });
+      };
+
+      setLoadState((s) => ({
+        ...s,
+        error: "",
+        existingVote: { id: inserted.id, product_id: selectedId },
+      }));
+      setSelectedId(null);
+
+      let goldenReveal = false;
+      if (user?.id) {
+        const { data: log } = await supabase
+          .from("smashalope_log")
+          .select("id, user_id, target_time")
+          .eq("season_id", loadState.season.id)
+          .eq("matchup_index", loadState.matchupIndex)
+          .maybeSingle();
+
+        const pastTarget =
+          log?.target_time &&
+          log.user_id == null &&
+          Date.now() > new Date(log.target_time).getTime();
+
+        if (pastTarget) {
+          const { data: claimed } = await supabase
+            .from("smashalope_log")
+            .update({ user_id: user.id })
+            .eq("season_id", loadState.season.id)
+            .eq("matchup_index", loadState.matchupIndex)
+            .is("user_id", null)
+            .select("id");
+
+          if (claimed?.length) {
+            goldenReveal = true;
+            setLoadState((s) => ({
+              ...s,
+              smashalopeLog: s.smashalopeLog
+                ? { ...s.smashalopeLog, user_id: user.id }
+                : { id: log.id, user_id: user.id, decision: null, target_time: log.target_time },
+            }));
+            setGoldenRevealSession(sessionPayload);
+          }
+        }
+      }
+
+      if (!goldenReveal) {
+        setSmashSession(sessionPayload);
+      }
     } catch (e) {
       setLoadState((s) => ({
         ...s,
@@ -262,6 +351,19 @@ export default function Battle() {
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-violet-100 via-fuchsia-50 to-orange-50">
+      {goldenRevealSession && (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-amber-400 via-yellow-300 to-amber-500 px-6 text-center shadow-[inset_0_0_120px_rgba(251,191,36,0.6)]"
+          role="alert"
+          aria-live="assertive"
+        >
+          <p className="max-w-lg text-3xl font-black uppercase tracking-tight text-amber-950 drop-shadow-sm sm:text-4xl">
+            The Golden Smashalope has chosen you!
+          </p>
+          <p className="text-sm font-semibold text-amber-950/80">Hold tight…</p>
+        </div>
+      )}
+
       <header className="sticky top-0 z-20 border-b border-violet-200/80 bg-white/85 px-4 py-3 shadow-sm backdrop-blur-md sm:px-6">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
           {user ? (
@@ -332,18 +434,6 @@ export default function Battle() {
                     ? "The Smashalope has descended."
                     : "The antlers await on the altar."}
                 </p>
-                {user?.id &&
-                  loadState.smashalopeLog?.user_id &&
-                  loadState.smashalopeLog.user_id === user.id && (
-                    <div
-                      className="rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 px-4 py-3 text-center shadow-lg shadow-amber-300/40 ring-1 ring-amber-300/60"
-                      role="status"
-                    >
-                      <p className="text-lg font-extrabold tracking-tight text-amber-950 sm:text-xl">
-                        The Golden Smashalope has chosen you
-                      </p>
-                    </div>
-                  )}
               </div>
             )}
 
