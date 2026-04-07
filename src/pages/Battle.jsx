@@ -64,15 +64,11 @@ export default function Battle() {
   const [showGoldenDecisionLine, setShowGoldenDecisionLine] = useState(false);
 
   const completeSmash = useCallback(() => {
-    setSmashSession((session) => {
-      if (!session) return null;
-      queueMicrotask(() => {
-        if (wonGoldenSmashalopeRef.current) {
-          setPostSmashGoldenOverlay(true);
-        }
-      });
-      return null;
-    });
+    const pendingGolden = wonGoldenSmashalopeRef.current;
+    setSmashSession(null);
+    if (pendingGolden) {
+      setPostSmashGoldenOverlay(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -403,7 +399,10 @@ export default function Battle() {
           </div>
         )}
 
-        {loadState.error && loadState.status !== "loading" && (
+        {loadState.error &&
+          loadState.status !== "loading" &&
+          !smashSession &&
+          !postSmashGoldenOverlay && (
           <div
             className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-center text-red-800"
             role="alert"
@@ -430,7 +429,9 @@ export default function Battle() {
 
         {loadState.status === "ready" && loadState.products.length >= 2 && (
           <>
-            {loadState.matchupIndex != null && (
+            {loadState.matchupIndex != null &&
+              !smashSession &&
+              !postSmashGoldenOverlay && (
               <div className="mb-6 w-full space-y-3">
                 <p className="text-center text-sm font-medium text-violet-800/90 sm:text-base">
                   {loadState.smashalopeLog?.user_id
@@ -441,13 +442,15 @@ export default function Battle() {
             )}
 
             {smashSession && loadState.season && loadState.matchupIndex != null ? (
-              <SmashScreen
-                product={smashSession.product}
-                seasonId={loadState.season.id}
-                matchupIndex={loadState.matchupIndex}
-                voteId={smashSession.voteId}
-                onComplete={completeSmash}
-              />
+              <div className="flex min-h-[calc(100dvh-9rem)] w-full flex-1 flex-col items-center justify-center">
+                <SmashScreen
+                  product={smashSession.product}
+                  seasonId={loadState.season.id}
+                  matchupIndex={loadState.matchupIndex}
+                  voteId={smashSession.voteId}
+                  onComplete={completeSmash}
+                />
+              </div>
             ) : (
               <>
             <div className="mb-6 text-center">
