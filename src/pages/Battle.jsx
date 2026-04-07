@@ -562,12 +562,18 @@ export default function Battle() {
             )}
 
             {loadState.season && !smashSession && (
-              <div className="mt-10 flex justify-center">
+              <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
                 <Link
                   to="/bracket"
                   className="inline-flex min-h-11 items-center justify-center rounded-full border-2 border-violet-400 bg-white px-6 py-2.5 text-sm font-bold text-violet-800 shadow-sm transition hover:bg-violet-50"
                 >
                   View Bracket
+                </Link>
+                <Link
+                  to="/shrine"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full border-2 border-amber-500/80 bg-gradient-to-r from-amber-50 to-yellow-50 px-6 py-2.5 text-sm font-bold text-amber-950 shadow-sm ring-1 ring-amber-400/40 transition hover:from-amber-100 hover:to-amber-50"
+                >
+                  View Shrine
                 </Link>
               </div>
             )}
