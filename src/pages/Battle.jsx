@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import SmashScreen from "../components/SmashScreen.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import {
@@ -9,28 +9,7 @@ import {
 } from "../lib/bracket.js";
 import { getSessionId } from "../lib/session.js";
 import { supabase } from "../lib/supabase.js";
-
-/** True when local time in America/New_York is 8:00 PM or later (cron fallback window). */
-function isPast8PMEastern(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-  return hour >= 20;
-}
-
-/** True when Eastern time is 6:00 AM or later (lazy seed window). */
-function isAfter6AMEastern(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    hour: "numeric",
-    hour12: false,
-  }).formatToParts(now);
-  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
-  return hour >= 6;
-}
+import { isAfter6AMEastern, isPast8PMEastern } from "../lib/easternTime.js";
 
 function matchupHasNoWinner(matchup) {
   if (!matchup) return true;
@@ -39,6 +18,7 @@ function matchupHasNoWinner(matchup) {
 }
 
 export default function Battle() {
+  const navigate = useNavigate();
   const { user, profile, loading: authLoading, signOut } = useAuth();
 
   const [loadState, setLoadState] = useState({
@@ -60,8 +40,6 @@ export default function Battle() {
   const wonGoldenSmashalopeRef = useRef(false);
   /** Full-screen golden moment after power-ups complete */
   const [postSmashGoldenOverlay, setPostSmashGoldenOverlay] = useState(false);
-  /** Extra copy on the voted banner after the overlay */
-  const [showGoldenDecisionLine, setShowGoldenDecisionLine] = useState(false);
 
   const completeSmash = useCallback(() => {
     const pendingGolden = wonGoldenSmashalopeRef.current;
@@ -76,10 +54,10 @@ export default function Battle() {
     const t = setTimeout(() => {
       wonGoldenSmashalopeRef.current = false;
       setPostSmashGoldenOverlay(false);
-      setShowGoldenDecisionLine(true);
+      navigate("/smashalope");
     }, 3000);
     return () => clearTimeout(t);
-  }, [postSmashGoldenOverlay]);
+  }, [postSmashGoldenOverlay, navigate]);
 
   const loadBattle = useCallback(async (fromResolveChain = false, fromSeedFallback = false) => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
@@ -284,7 +262,6 @@ export default function Battle() {
       setSelectedId(null);
 
       wonGoldenSmashalopeRef.current = false;
-      setShowGoldenDecisionLine(false);
       if (user?.id) {
         const { data: log } = await supabase
           .from("smashalope_log")
@@ -472,11 +449,6 @@ export default function Battle() {
                   </p>
                   {votedProduct?.brand && (
                     <p className="mt-1 text-sm font-medium text-emerald-800/90">{votedProduct.brand}</p>
-                  )}
-                  {showGoldenDecisionLine && user && (
-                    <p className="mt-4 text-base font-semibold text-amber-900">
-                      You are today&apos;s Golden Smashalope. Your decision awaits.
-                    </p>
                   )}
                 </div>
 
