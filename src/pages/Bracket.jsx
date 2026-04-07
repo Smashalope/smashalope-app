@@ -7,19 +7,34 @@ import {
 } from "../lib/bracket.js";
 import { supabase } from "../lib/supabase.js";
 
-function decidedByLabel(raw) {
-  if (raw == null || raw === "") return null;
-  const s = String(raw).toLowerCase().replace(/_/g, " ");
-  const map = {
-    "popular vote": "Popular vote",
-    popular: "Popular vote",
-    "smashalope upset": "Smashalope upset",
-    smashalope: "Smashalope upset",
-    chaos: "Chaos",
-    "desk guy": "Desk guy",
-  };
-  if (map[s]) return map[s];
-  return raw.charAt(0).toUpperCase() + raw.slice(1).replace(/_/g, " ");
+/** Narrative under resolved matchups; `loserName` = product that did not advance. */
+function buildOutcomeNarrative(decidedByRaw, winnerName, loserName, votePct, productAId, productBId) {
+  if (decidedByRaw == null || decidedByRaw === "") return null;
+  const key = String(decidedByRaw).toLowerCase().trim();
+  const wn = winnerName?.trim() || "the winner";
+  const ln = loserName?.trim() || "the other";
+
+  const pct = parseVotePct(votePct, productAId, productBId);
+  const bothFiftyFifty =
+    pct.left != null && pct.right != null && pct.left === 50 && pct.right === 50;
+
+  switch (key) {
+    case "popular_vote":
+      return "The people have spoken.";
+    case "smashalope_upheld":
+      return `The Smashalope picked ${wn}. So did everyone else.`;
+    case "smashalope_upset":
+      return `The people picked ${ln}. The Smashalope picked ${wn}. ${wn} advances.`;
+    case "chaos":
+      return `The people picked ${ln}. The Smashalope chose chaos. ${wn} advances.`;
+    case "desk_guy":
+      if (bothFiftyFifty) {
+        return `Nobody voted. Desk Guy picked up the phone, sighed, and pointed at ${wn}.`;
+      }
+      return `Dead tie. Desk Guy picked up the phone, sighed, and broke it for ${wn}.`;
+    default:
+      return null;
+  }
 }
 
 /** Normalize vote_pct to { left: number|null, right: number|null } for product_a / product_b order */
@@ -125,7 +140,16 @@ function MatchupCard({
   if (hasWinner && hasBothProducts) {
     const pct = parseVotePct(matchup.vote_pct, pa, pb);
     const aWins = winnerId === pa;
-    const decided = decidedByLabel(matchup.decided_by);
+    const winnerName = aWins ? prodA?.name : prodB?.name;
+    const loserName = aWins ? prodB?.name : prodA?.name;
+    const narrative = buildOutcomeNarrative(
+      matchup.decided_by,
+      winnerName,
+      loserName,
+      matchup.vote_pct,
+      pa,
+      pb
+    );
 
     return (
       <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -151,10 +175,8 @@ function MatchupCard({
             {pct.right != null && <p className="mt-1 text-lg font-black text-gray-800">{pct.right}%</p>}
           </div>
         </div>
-        {decided && (
-          <p className="mt-3 text-center text-sm text-gray-600">
-            Decided by: <span className="font-semibold text-gray-800">{decided}</span>
-          </p>
+        {narrative && (
+          <p className="mt-3 text-center text-sm leading-snug text-gray-700">{narrative}</p>
         )}
       </div>
     );

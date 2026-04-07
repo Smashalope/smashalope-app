@@ -334,8 +334,9 @@ export default function Battle() {
     loadState.existingVote && votedProduct && !smashSession && !postSmashGoldenOverlay
   );
 
+  /** Today's Golden Smashalope (before 8 PM): show in header and again under "You voted…" so it stays visible after voting. */
   const showGoldenDecisionPill =
-    user &&
+    Boolean(user) &&
     loadState.status === "ready" &&
     loadState.smashalopeLog &&
     String(loadState.smashalopeLog.user_id) === String(user.id) &&
@@ -343,6 +344,9 @@ export default function Battle() {
     !isPast8PMEastern() &&
     !smashSession &&
     !postSmashGoldenOverlay;
+
+  const goldenDecisionPillClassName =
+    "inline-flex items-center gap-1.5 rounded-full border-2 border-amber-400/90 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 px-4 py-2 text-sm font-extrabold tracking-tight text-amber-950 shadow-md shadow-amber-300/40 ring-1 ring-amber-400/50 transition hover:from-amber-50 hover:to-yellow-100 hover:shadow-amber-400/50";
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-violet-100 via-fuchsia-50 to-orange-50">
@@ -389,11 +393,8 @@ export default function Battle() {
           </div>
           {showGoldenDecisionPill && (
             <div className="flex justify-center sm:justify-end">
-              <Link
-                to="/smashalope"
-                className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-400/90 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 px-4 py-2 text-sm font-extrabold tracking-tight text-amber-950 shadow-md shadow-amber-300/40 ring-1 ring-amber-400/50 transition hover:from-amber-50 hover:to-yellow-100 hover:shadow-amber-400/50"
-              >
-                Your decision awaits <span aria-hidden>→</span>
+              <Link to="/smashalope" className={goldenDecisionPillClassName}>
+                Change your Smashalope decision <span aria-hidden>→</span>
               </Link>
             </div>
           )}
@@ -482,6 +483,14 @@ export default function Battle() {
                     <p className="mt-1 text-sm font-medium text-emerald-800/90">{votedProduct.brand}</p>
                   )}
                 </div>
+
+                {showGoldenDecisionPill && (
+                  <div className="flex justify-center">
+                    <Link to="/smashalope" className={goldenDecisionPillClassName}>
+                      Change your Smashalope decision <span aria-hidden>→</span>
+                    </Link>
+                  </div>
+                )}
 
                 {!user && (
                   <p className="text-center text-base font-medium text-violet-900">
