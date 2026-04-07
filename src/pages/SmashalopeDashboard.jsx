@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { fetchActiveSeason, getProductIdsFromMatchup, getTodayMatchup } from "../lib/bracket.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import { supabase } from "../lib/supabase.js";
@@ -9,6 +9,17 @@ import { supabase } from "../lib/supabase.js";
 // 2) Re-add useNowTick (30s) so `now` updates and the UI crosses into locked at 8 PM without refresh.
 // 3) Replace the line below with: const locked = isPast8PMEastern(now);
 const locked = false;
+
+const CHAOS_HELP =
+  "At 8 PM, this automatically sides with whoever is losing — no matter how the votes shift between now and then. It’s a live bet against the majority at the moment of the call.";
+
+function choiceLabel(decision, productA, productB) {
+  if (decision === "product_a" && productA) return productA.name;
+  if (decision === "product_b" && productB) return productB.name;
+  if (decision === "chaos") return "Chaos";
+  if (decision === "abstain") return "Go to the beach";
+  return "";
+}
 
 export default function SmashalopeDashboard() {
   const navigate = useNavigate();
@@ -24,9 +35,16 @@ export default function SmashalopeDashboard() {
   const [countA, setCountA] = useState(0);
   const [countB, setCountB] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState(null);
 
   const productAId = productA?.id;
   const productBId = productB?.id;
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const t = setTimeout(() => setToast(null), 2000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const loadVoteCounts = useCallback(async () => {
     if (!seasonId || matchupIndex == null || !productAId || !productBId) return;
@@ -154,14 +172,31 @@ export default function SmashalopeDashboard() {
   const pctA = total > 0 ? Math.round((countA / total) * 100) : 50;
   const pctB = total > 0 ? 100 - pctA : 50;
 
-  const leadingProduct = useMemo(() => {
-    if (countA > countB) return productA;
-    if (countB > countA) return productB;
-    return null;
-  }, [countA, countB, productA, productB]);
+  function pushToast(nextDecision, previousDecision) {
+    if (nextDecision === "abstain") {
+      setToast("The Smashalope is headed to the beach.");
+      return;
+    }
+    const name = choiceLabel(nextDecision, productA, productB);
+    if (!previousDecision) {
+      setToast(`Locked in: ${name}`);
+    } else {
+      setToast(`Changed to: ${name}`);
+    }
+  }
 
   async function applyDecision(payload) {
     if (!logRow?.id || locked || saving) return;
+    const cur = logRow.decision ?? null;
+    if (
+      (payload.decision === "product_a" && cur === "product_a") ||
+      (payload.decision === "product_b" && cur === "product_b") ||
+      (payload.decision === "chaos" && cur === "chaos") ||
+      (payload.decision === "abstain" && cur === "abstain")
+    ) {
+      return;
+    }
+    const previousDecision = cur;
     setSaving(true);
     setError("");
     try {
@@ -180,6 +215,7 @@ export default function SmashalopeDashboard() {
 
       if (uErr) throw uErr;
       setLogRow(data);
+      pushToast(data.decision, previousDecision);
       await loadVoteCounts();
     } catch (e) {
       setError(e?.message ?? "Could not save decision.");
@@ -194,10 +230,7 @@ export default function SmashalopeDashboard() {
     if (d === "product_a" && productA) return { label: productA.name, sub: "Your pick for the people" };
     if (d === "product_b" && productB) return { label: productB.name, sub: "Your pick for the people" };
     if (d === "chaos") {
-      const target = leadingProduct
-        ? `Upset ${leadingProduct.name}`
-        : "Break the deadlock";
-      return { label: "Chaos", sub: target };
+      return { label: "Chaos", sub: CHAOS_HELP };
     }
     if (d === "abstain") {
       return { label: "The beach", sub: "The Smashalope went to the beach." };
@@ -230,25 +263,40 @@ export default function SmashalopeDashboard() {
     );
   }
 
+  const d = logRow?.decision;
+
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-stone-950 via-amber-950/25 to-stone-950 text-amber-50">
-      <header className="border-b border-amber-500/20 bg-black/30 px-4 py-4 backdrop-blur-sm sm:px-6">
+      <header className="border-b border-amber-500/20 bg-black/30 px-4 py-5 backdrop-blur-sm sm:px-6">
         <div className="mx-auto max-w-3xl text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-amber-400/90">Golden mantle</p>
           <h1 className="mt-2 bg-gradient-to-r from-amber-200 via-yellow-300 to-amber-400 bg-clip-text text-2xl font-black tracking-tight text-transparent sm:text-3xl">
             You are today&apos;s Golden Smashalope
           </h1>
+          <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-amber-100/85 sm:text-lg">
+            You hold the power to change today&apos;s outcome. Pick the winner — or choose chaos. Whatever you decide
+            at 8 PM is final.
+          </p>
         </div>
       </header>
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-4 py-8 sm:px-6">
+        <div className="mb-2 flex justify-center">
+          <Link
+            to="/"
+            className="text-sm font-medium text-amber-400/90 transition hover:text-amber-200 hover:underline"
+          >
+            ← Back to battle
+          </Link>
+        </div>
+
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-3 text-center text-sm text-red-200">
             {error}
           </div>
         )}
 
-        <section className="mb-10 text-center">
+        <section className="mb-8 text-center">
           <p className="text-xs font-bold uppercase tracking-widest text-amber-500/80">Today&apos;s matchup</p>
           <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-8">
             <p className="text-2xl font-black text-amber-100 sm:text-3xl">{productA?.name}</p>
@@ -287,99 +335,120 @@ export default function SmashalopeDashboard() {
               <div className="mt-6 border-t border-amber-500/20 pt-6">
                 <p className="text-sm font-semibold uppercase tracking-wide text-amber-400/90">What you locked in</p>
                 <p className="mt-2 text-2xl font-black text-amber-50">{summary.label}</p>
-                {summary.sub && <p className="mt-1 text-sm text-amber-200/75">{summary.sub}</p>}
+                {summary.sub && <p className="mt-2 text-left text-sm leading-relaxed text-amber-200/75">{summary.sub}</p>}
               </div>
             )}
           </section>
         ) : (
           <>
-            {summary && (
-              <div className="mb-6 rounded-2xl border border-amber-400/25 bg-amber-950/50 px-5 py-4 text-center">
-                <p className="text-sm text-amber-200/90">
-                  <span className="font-semibold text-amber-100">Current choice:</span> {summary.label}
-                </p>
-                {summary.sub && <p className="mt-1 text-xs text-amber-200/60">{summary.sub}</p>}
-                <p className="mt-3 text-xs text-amber-300/80">Change your mind? Pick another option below — you can switch until 8 PM ET.</p>
-              </div>
-            )}
+            <p className="mb-4 text-center text-xs text-amber-200/55">Tap an option to select — you can change until 8 PM ET.</p>
 
-            <section className="flex flex-col gap-4">
+            <section className="flex flex-col gap-3">
+              {/* Product A */}
               <button
                 type="button"
                 disabled={saving}
-                onClick={() =>
-                  applyDecision({ decision: "product_a", decision_product_id: productAId })
-                }
-                className={`rounded-2xl border-4 px-6 py-5 text-left text-xl font-black transition ${
-                  logRow?.decision === "product_a"
-                    ? "border-amber-300 bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 shadow-lg shadow-amber-500/30"
-                    : "border-amber-600/50 bg-gradient-to-r from-amber-600/90 to-orange-600/90 text-stone-950 hover:from-amber-500 hover:to-orange-500"
+                onClick={() => applyDecision({ decision: "product_a", decision_product_id: productAId })}
+                className={`relative flex w-full items-start gap-3 rounded-2xl border-2 px-5 py-4 text-left transition-all duration-200 ${
+                  d === "product_a"
+                    ? "border-amber-300 bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 text-stone-950 shadow-lg shadow-amber-500/35 ring-2 ring-amber-200/40"
+                    : "border-amber-700/40 bg-stone-900/60 text-amber-100/65 hover:border-amber-600/55 hover:bg-stone-900/80"
                 }`}
               >
-                {productA?.name}
+                <span className="min-w-0 flex-1 text-xl font-black">{productA?.name}</span>
+                {d === "product_a" && (
+                  <span className="shrink-0 text-2xl leading-none text-stone-950 drop-shadow" aria-hidden>
+                    ✓
+                  </span>
+                )}
               </button>
 
+              {/* Product B */}
               <button
                 type="button"
                 disabled={saving}
-                onClick={() =>
-                  applyDecision({ decision: "product_b", decision_product_id: productBId })
-                }
-                className={`rounded-2xl border-4 px-6 py-5 text-left text-xl font-black transition ${
-                  logRow?.decision === "product_b"
-                    ? "border-amber-300 bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 shadow-lg shadow-amber-500/30"
-                    : "border-amber-600/50 bg-gradient-to-r from-amber-600/90 to-orange-600/90 text-stone-950 hover:from-amber-500 hover:to-orange-500"
+                onClick={() => applyDecision({ decision: "product_b", decision_product_id: productBId })}
+                className={`relative flex w-full items-start gap-3 rounded-2xl border-2 px-5 py-4 text-left transition-all duration-200 ${
+                  d === "product_b"
+                    ? "border-amber-300 bg-gradient-to-br from-amber-400 via-amber-500 to-orange-500 text-stone-950 shadow-lg shadow-amber-500/35 ring-2 ring-amber-200/40"
+                    : "border-amber-700/40 bg-stone-900/60 text-amber-100/65 hover:border-amber-600/55 hover:bg-stone-900/80"
                 }`}
               >
-                {productB?.name}
+                <span className="min-w-0 flex-1 text-xl font-black">{productB?.name}</span>
+                {d === "product_b" && (
+                  <span className="shrink-0 text-2xl leading-none text-stone-950 drop-shadow" aria-hidden>
+                    ✓
+                  </span>
+                )}
               </button>
 
+              {/* Chaos */}
               <button
                 type="button"
                 disabled={saving}
                 onClick={() => applyDecision({ decision: "chaos", decision_product_id: null })}
-                className={`relative rounded-xl border-2 px-5 py-3 text-left text-base font-bold transition ${
-                  logRow?.decision === "chaos"
-                    ? "border-red-400 bg-red-950/80 text-red-100 shadow-md shadow-red-900/40"
-                    : "border-red-900/80 bg-gradient-to-br from-red-950 to-stone-950 text-red-200/95 hover:border-red-600 hover:bg-red-950/90"
-                } `}
+                className={`relative flex w-full flex-col gap-1 rounded-2xl border-2 px-5 py-4 text-left transition-all duration-200 ${
+                  d === "chaos"
+                    ? "border-red-400 bg-gradient-to-br from-red-900 via-red-950 to-stone-950 text-red-50 shadow-lg shadow-red-900/50 ring-2 ring-red-400/30"
+                    : "border-red-900/50 bg-red-950/30 text-red-200/75 hover:border-red-700/70 hover:bg-red-950/45"
+                }`}
               >
-                <span className="block text-lg">Choose chaos</span>
-                <span className="mt-1 block text-xs font-normal text-red-300/80">
-                  {leadingProduct
-                    ? `Strike against ${leadingProduct.name} — tip the scales the other way.`
-                    : "The vote is tied — break the deadlock."}
-                </span>
+                <div className="flex w-full items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <span className="block text-lg font-black">Chaos</span>
+                    <span className="mt-1 block text-xs font-normal leading-snug text-red-200/85">
+                      {CHAOS_HELP}
+                    </span>
+                  </div>
+                  {d === "chaos" && (
+                    <span className="shrink-0 text-2xl leading-none text-red-100 drop-shadow" aria-hidden>
+                      ✓
+                    </span>
+                  )}
+                </div>
               </button>
-            </section>
 
-            <div className="mt-auto flex flex-col items-center pt-12 pb-8">
+              {/* Beach */}
               <button
                 type="button"
                 disabled={saving}
                 onClick={() => applyDecision({ decision: "abstain", decision_product_id: null })}
-                className={`text-sm underline decoration-amber-600/50 underline-offset-4 transition hover:text-amber-200 ${
-                  logRow?.decision === "abstain" ? "font-semibold text-amber-200" : "text-amber-400/70"
+                className={`relative flex w-full items-start gap-3 rounded-2xl border-2 px-5 py-4 text-left transition-all duration-200 ${
+                  d === "abstain"
+                    ? "border-amber-600/80 bg-gradient-to-br from-amber-800/90 via-yellow-900/80 to-stone-900 text-amber-50 shadow-lg shadow-amber-900/40 ring-2 ring-amber-500/35"
+                    : "border-amber-800/35 bg-gradient-to-br from-stone-800/80 to-amber-950/40 text-amber-200/70 hover:border-amber-700/50"
                 }`}
               >
-                Go to the beach
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-2xl leading-none" aria-hidden>
+                      🌴
+                    </span>
+                    <span className="text-lg font-black">Go to the beach</span>
+                  </div>
+                  <span className="mt-1 block text-xs font-normal text-amber-200/70">
+                    Step away — no pick, no sway.
+                  </span>
+                </div>
+                {d === "abstain" && (
+                  <span className="shrink-0 text-2xl leading-none text-amber-100 drop-shadow" aria-hidden>
+                    ✓
+                  </span>
+                )}
               </button>
-              <p className="mt-3 max-w-sm text-center text-xs text-amber-200/45">
-                The Smashalope went to the beach.
+            </section>
+
+            {toast && (
+              <p
+                className="mt-6 text-center text-sm font-semibold text-amber-200 transition-opacity duration-300"
+                role="status"
+              >
+                {toast}
               </p>
-            </div>
+            )}
           </>
         )}
 
-        <div className="mt-8 flex justify-center pb-6">
-          <button
-            type="button"
-            onClick={() => navigate("/")}
-            className="text-sm font-medium text-amber-500/80 hover:text-amber-300 hover:underline"
-          >
-            ← Back to today&apos;s battle
-          </button>
-        </div>
       </main>
     </div>
   );

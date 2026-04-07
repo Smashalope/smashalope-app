@@ -40,6 +40,8 @@ export default function Battle() {
   const wonGoldenSmashalopeRef = useRef(false);
   /** Full-screen golden moment after power-ups complete */
   const [postSmashGoldenOverlay, setPostSmashGoldenOverlay] = useState(false);
+  /** Re-render periodically so the Golden Smashalope pill hides after 8 PM ET without navigation. */
+  const [goldenPillTick, setGoldenPillTick] = useState(0);
 
   const completeSmash = useCallback(() => {
     const pendingGolden = wonGoldenSmashalopeRef.current;
@@ -58,6 +60,13 @@ export default function Battle() {
     }, 3000);
     return () => clearTimeout(t);
   }, [postSmashGoldenOverlay, navigate]);
+
+  useEffect(() => {
+    if (!user?.id || !loadState.smashalopeLog?.user_id) return undefined;
+    if (String(loadState.smashalopeLog.user_id) !== String(user.id)) return undefined;
+    const id = setInterval(() => setGoldenPillTick((t) => t + 1), 30_000);
+    return () => clearInterval(id);
+  }, [user?.id, loadState.smashalopeLog?.user_id]);
 
   const loadBattle = useCallback(async (fromResolveChain = false, fromSeedFallback = false) => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
@@ -325,6 +334,16 @@ export default function Battle() {
     loadState.existingVote && votedProduct && !smashSession && !postSmashGoldenOverlay
   );
 
+  const showGoldenDecisionPill =
+    user &&
+    loadState.status === "ready" &&
+    loadState.smashalopeLog &&
+    String(loadState.smashalopeLog.user_id) === String(user.id) &&
+    goldenPillTick >= 0 &&
+    !isPast8PMEastern() &&
+    !smashSession &&
+    !postSmashGoldenOverlay;
+
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-violet-100 via-fuchsia-50 to-orange-50">
       {postSmashGoldenOverlay && (
@@ -341,7 +360,8 @@ export default function Battle() {
       )}
 
       <header className="sticky top-0 z-20 border-b border-violet-200/80 bg-white/85 px-4 py-3 shadow-sm backdrop-blur-md sm:px-6">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+        <div className="mx-auto flex max-w-5xl flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
           {user ? (
             <>
               <h1 className="truncate text-lg font-bold text-violet-950 sm:text-xl">
@@ -365,6 +385,17 @@ export default function Battle() {
                 Log in
               </Link>
             </>
+          )}
+          </div>
+          {showGoldenDecisionPill && (
+            <div className="flex justify-center sm:justify-end">
+              <Link
+                to="/smashalope"
+                className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-400/90 bg-gradient-to-r from-amber-100 via-yellow-50 to-amber-100 px-4 py-2 text-sm font-extrabold tracking-tight text-amber-950 shadow-md shadow-amber-300/40 ring-1 ring-amber-400/50 transition hover:from-amber-50 hover:to-yellow-100 hover:shadow-amber-400/50"
+              >
+                Your decision awaits <span aria-hidden>→</span>
+              </Link>
+            </div>
           )}
         </div>
       </header>
