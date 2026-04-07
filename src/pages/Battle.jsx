@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import SmashScreen from "../components/SmashScreen.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -56,31 +56,34 @@ export default function Battle() {
   const [submitting, setSubmitting] = useState(false);
   /** After inserting a vote, power-up UI before showing the confirmation banner */
   const [smashSession, setSmashSession] = useState(null);
-  /** Golden Smashalope win: full-screen reveal before SmashScreen */
-  const [goldenRevealSession, setGoldenRevealSession] = useState(null);
+  /** Set at vote time if this user won the Golden Smashalope claim (reveal runs after SmashScreen). */
+  const wonGoldenSmashalopeRef = useRef(false);
+  /** Full-screen golden moment after power-ups complete */
+  const [postSmashGoldenOverlay, setPostSmashGoldenOverlay] = useState(false);
+  /** Extra copy on the voted banner after the overlay */
+  const [showGoldenDecisionLine, setShowGoldenDecisionLine] = useState(false);
 
   const completeSmash = useCallback(() => {
     setSmashSession((session) => {
       if (!session) return null;
-      const { voteId, product } = session;
       queueMicrotask(() => {
-        setLoadState((s) => ({
-          ...s,
-          existingVote: { id: voteId, product_id: product.id },
-        }));
+        if (wonGoldenSmashalopeRef.current) {
+          setPostSmashGoldenOverlay(true);
+        }
       });
       return null;
     });
   }, []);
 
   useEffect(() => {
-    if (!goldenRevealSession) return undefined;
+    if (!postSmashGoldenOverlay) return undefined;
     const t = setTimeout(() => {
-      setSmashSession(goldenRevealSession);
-      setGoldenRevealSession(null);
+      wonGoldenSmashalopeRef.current = false;
+      setPostSmashGoldenOverlay(false);
+      setShowGoldenDecisionLine(true);
     }, 3000);
     return () => clearTimeout(t);
-  }, [goldenRevealSession]);
+  }, [postSmashGoldenOverlay]);
 
   const loadBattle = useCallback(async (fromResolveChain = false, fromSeedFallback = false) => {
     setLoadState((s) => ({ ...s, status: "loading", error: "" }));
@@ -284,7 +287,8 @@ export default function Battle() {
       }));
       setSelectedId(null);
 
-      let goldenReveal = false;
+      wonGoldenSmashalopeRef.current = false;
+      setShowGoldenDecisionLine(false);
       if (user?.id) {
         const { data: log } = await supabase
           .from("smashalope_log")
@@ -308,21 +312,18 @@ export default function Battle() {
             .select("id");
 
           if (claimed?.length) {
-            goldenReveal = true;
+            wonGoldenSmashalopeRef.current = true;
             setLoadState((s) => ({
               ...s,
               smashalopeLog: s.smashalopeLog
                 ? { ...s.smashalopeLog, user_id: user.id }
                 : { id: log.id, user_id: user.id, decision: null, target_time: log.target_time },
             }));
-            setGoldenRevealSession(sessionPayload);
           }
         }
       }
 
-      if (!goldenReveal) {
-        setSmashSession(sessionPayload);
-      }
+      setSmashSession(sessionPayload);
     } catch (e) {
       setLoadState((s) => ({
         ...s,
@@ -347,11 +348,13 @@ export default function Battle() {
     loadState.existingVote &&
     loadState.products.find((p) => p.id === loadState.existingVote.product_id);
 
-  const showVotedBanner = Boolean(loadState.existingVote && votedProduct && !smashSession);
+  const showVotedBanner = Boolean(
+    loadState.existingVote && votedProduct && !smashSession && !postSmashGoldenOverlay
+  );
 
   return (
     <div className="flex min-h-screen flex-col bg-gradient-to-b from-violet-100 via-fuchsia-50 to-orange-50">
-      {goldenRevealSession && (
+      {postSmashGoldenOverlay && (
         <div
           className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-amber-400 via-yellow-300 to-amber-500 px-6 text-center shadow-[inset_0_0_120px_rgba(251,191,36,0.6)]"
           role="alert"
@@ -466,6 +469,11 @@ export default function Battle() {
                   </p>
                   {votedProduct?.brand && (
                     <p className="mt-1 text-sm font-medium text-emerald-800/90">{votedProduct.brand}</p>
+                  )}
+                  {showGoldenDecisionLine && user && (
+                    <p className="mt-4 text-base font-semibold text-amber-900">
+                      You are today&apos;s Golden Smashalope. Your decision awaits.
+                    </p>
                   )}
                 </div>
 
